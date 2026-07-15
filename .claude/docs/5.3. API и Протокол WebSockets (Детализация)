@@ -1,0 +1,288 @@
+## 5.3. API и Протокол WebSockets (Детализация)
+
+### 5.3.1. REST API
+
+Все REST API запросы будут использовать JSON в качестве формата данных и будут защищены JWT токенами, за исключением эндпоинтов регистрации и логина.
+
+#### 1. Аутентификация
+
+**`POST /api/v1/auth/register`**
+*   **Описание:** Регистрация нового пользователя.
+*   **Запрос (Request Body):**
+    ```json
+    {
+      "email": "user@example.com",
+      "password": "StrongPassword123!",
+      "nickname": "PlayerOne"
+    }
+    ```
+*   **Ответ (Response Body - 201 Created):**
+    ```json
+    {
+      "message": "User registered successfully. Please check your email for verification.",
+      "user_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+    }
+    ```
+*   **Ошибки (Error Response - 400 Bad Request / 409 Conflict):**
+    ```json
+    {
+      "error": "email already exists"
+    }
+    ```
+
+**`GET /api/v1/auth/verify-email?code={code}`**
+*   **Описание:** Подтверждение email пользователя.
+*   **Параметры запроса (Query Parameters):**
+    *   `code`: Уникальный код верификации, отправленный на email.
+*   **Ответ (Response Body - 200 OK):**
+    ```json
+    {
+      "message": "Email verified successfully."
+    }
+    ```
+*   **Ошибки (Error Response - 400 Bad Request / 404 Not Found):**
+    ```json
+    {
+      "error": "verification code expired or invalid"
+    }
+    ```
+
+**`POST /api/v1/auth/login`**
+*   **Описание:** Вход пользователя в систему.
+*   **Запрос (Request Body):**
+    ```json
+    {
+      "email": "user@example.com",
+      "password": "StrongPassword123!"
+    }
+    ```
+*   **Ответ (Response Body - 200 OK):**
+    ```json
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "user_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+    }
+    ```
+*   **Ошибки (Error Response - 401 Unauthorized):**
+    ```json
+    {
+      "error": "invalid credentials"
+    }
+    ```
+
+#### 2. Профиль Пользователя
+
+**`GET /api/v1/profile`**
+*   **Описание:** Получение данных профиля текущего пользователя.
+*   **Заголовок (Headers):** `Authorization: Bearer <JWT_TOKEN>`
+*   **Ответ (Response Body - 200 OK):**
+    ```json
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      "email": "user@example.com",
+      "nickname": "PlayerOne",
+      "is_verified": true,
+      "wins": 10,
+      "losses": 5,
+      "created_at": "2023-10-27T10:00:00Z"
+    }
+    ```
+
+**`PUT /api/v1/profile`**
+*   **Описание:** Обновление никнейма пользователя.
+*   **Заголовок (Headers):** `Authorization: Bearer <JWT_TOKEN>`
+*   **Запрос (Request Body):**
+    ```json
+    {
+      "nickname": "NewPlayerName"
+    }
+    ```
+*   **Ответ (Response Body - 200 OK):**
+    ```json
+    {
+      "message": "Profile updated successfully.",
+      "nickname": "NewPlayerName"
+    }
+    ```
+*   **Ошибки (Error Response - 409 Conflict):**
+    ```json
+    {
+      "error": "nickname already exists"
+    }
+    ```
+
+#### 3. Поиск Игры
+
+**`POST /api/v1/game/find-match`**
+*   **Описание:** Инициирует поиск оппонента для игры 1v1. Пользователь помещается в очередь.
+*   **Заголовок (Headers):** `Authorization: Bearer <JWT_TOKEN>`
+*   **Запрос (Request Body):** (Пустой или может содержать параметры для фильтрации, если будут)
+    ```json
+    {}
+    ```
+*   **Ответ (Response Body - 202 Accepted):**
+    ```json
+    {
+      "message": "Searching for opponent...",
+      "user_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+    }
+    ```
+
+### 5.3.2. Протокол WebSockets для Игровых Сессий
+
+WebSockets будут использоваться для обмена сообщениями в реальном времени между клиентами и сервером во время игровой сессии. Каждая игровая сессия будет иметь свой уникальный WebSocket URL.
+
+**`GET /ws/game/{session_id}`**
+*   **Описание:** Установка WebSocket соединения для конкретной игровой сессии.
+*   **Параметры пути (Path Parameters):**
+    *   `session_id`: UUID игровой сессии.
+*   **Заголовок (Headers):** `Authorization: Bearer <JWT_TOKEN>` (JWT токен передается как часть заголовка при установке соединения).
+
+#### 1. Типы Сообщений (JSON)
+
+Все сообщения будут иметь поле `type` для определения типа события и `payload` для данных.
+
+**Сервер -> Клиент (Server to Client):**
+
+*   **`game_started`**
+    *   **Описание:** Уведомление о начале игры, когда найден второй игрок.
+    *   **Payload:**
+        ```json
+        {
+          "type": "game_started",
+          "payload": {
+            "session_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+            "player1": {"id": "uuid1", "nickname": "PlayerOne"},
+            "player2": {"id": "uuid2", "nickname": "PlayerTwo"},
+            "current_turn_user_id": "uuid1",
+            "turn_ends_at": "2023-10-27T10:01:00Z",
+            "last_movie": null,
+            "player1_skips_left": 1,
+            "player2_skips_left": 1,
+            "player1_hints_left": 1,
+            "player2_hints_left": 1
+          }
+        }
+        ```
+
+*   **`turn_update`**
+    *   **Описание:** Обновление информации о текущем ходе.
+    *   **Payload:**
+        ```json
+        {
+          "type": "turn_update",
+          "payload": {
+            "current_turn_user_id": "uuid2",
+            "turn_ends_at": "2023-10-27T10:02:00Z",
+            "last_movie": {
+              "id": 123,
+              "title": "Inception",
+              "poster_path": "/poster.jpg"
+            },
+            "player1_skips_left": 1,
+            "player2_skips_left": 1,
+            "player1_hints_left": 1,
+            "player2_hints_left": 1
+          }
+        }
+        ```
+
+*   **`game_ended`**
+    *   **Описание:** Уведомление об окончании игры.
+    *   **Payload:**
+        ```json
+        {
+          "type": "game_ended",
+          "payload": {
+            "session_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+            "winner_id": "uuid1",
+            "reason": "PlayerTwo ran out of time",
+            "final_score": {"player1": 5, "player2": 4}
+          }
+        }
+        ```
+
+*   **`error`**
+    *   **Описание:** Сообщение об ошибке в ходе игры.
+    *   **Payload:**
+        ```json
+        {
+          "type": "error",
+          "payload": {
+            "code": "invalid_move",
+            "message": "Movie is not connected to the previous one."
+          }
+        }
+        ```
+
+*   **`hint_revealed`**
+    *   **Описание:** Раскрытие подсказки (актеры/режиссеры/композиторы).
+    *   **Payload:**
+        ```json
+        {
+          "type": "hint_revealed",
+          "payload": {
+            "movie_id": 123,
+            "persons": [
+              {"id": 1, "name": "Leonardo DiCaprio", "role": "actor"},
+              {"id": 2, "name": "Christopher Nolan", "role": "director"}
+            ]
+          }
+        }
+        ```
+
+**Клиент -> Сервер (Client to Server):**
+
+*   **`make_move`**
+    *   **Описание:** Отправка хода игрока (предложение фильма).
+    *   **Payload:**
+        ```json
+        {
+          "type": "make_move",
+          "payload": {
+            "movie_id": 456, // TMDb ID предложенного фильма
+            "movie_title": "The Dark Knight" // Для удобства, но бэкенд будет проверять по ID
+          }
+        }
+        ```
+
+*   **`skip_turn`**
+    *   **Описание:** Запрос на пропуск хода.
+    *   **Payload:**
+        ```json
+        {
+          "type": "skip_turn"
+        }
+        ```
+
+*   **`request_hint`**
+    *   **Описание:** Запрос на использование подсказки.
+    *   **Payload:**
+        ```json
+        {
+          "type": "request_hint"
+        }
+        ```
+
+#### 2. Обработка Соединений
+
+*   Сервер должен отслеживать активные WebSocket соединения для каждой игровой сессии.
+*   При отключении игрока (например, закрытие приложения), сервер должен корректно завершить игру или пометить игрока как отключенного, а затем завершить игру по таймауту.
+*   Все сообщения должны быть валидированы на сервере.
+
+### 5.3.3. Взаимодействие с TMDb API
+
+*   **Получение API-ключа:** Необходимо зарегистрироваться на [The Movie Database (TMDb)](https://www.themoviedb.org/documentation/api) и получить API-ключ.
+*   **Основные эндпоинты TMDb, которые будут использоваться:**
+    *   `GET /movie/{movie_id}`: Получение детальной информации о фильме.
+    *   `GET /movie/{movie_id}/credits`: Получение списка актеров, режиссеров, композиторов для фильма.
+    *   `GET /search/movie`: Поиск фильмов по названию (для автодополнения в клиенте или для начального поиска).
+    *   `GET /person/{person_id}`: Получение детальной информации о персоне.
+*   **Кэширование:** Все данные, полученные от TMDb, должны быть кэшированы в локальной базе данных (таблицы `movies`, `persons`, `movie_person_roles`) для уменьшения нагрузки на внешний API и ускорения работы приложения.
+*   **Обработка ошибок:** Клиент TMDb в Go должен корректно обрабатывать ошибки API (например, лимиты запросов, неверные ID).
+
+### 5.3.4. Отправка Email
+
+*   **SMTP-сервер:** Для отправки писем подтверждения email потребуется настроить SMTP-клиент в Go.
+*   **Сервисы:** Для разработки и тестирования рекомендуется использовать сервисы типа [Mailtrap](https://mailtrap.io/) (для тестовых писем) или [Mailgun](https://www.mailgun.com/) (для реальной отправки).
+*   **Содержание письма:** Письмо должно содержать ссылку для верификации, например: `https://your-app.com/api/v1/auth/verify-email?code={verification_code}`.

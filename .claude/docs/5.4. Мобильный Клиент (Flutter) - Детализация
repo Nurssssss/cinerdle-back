@@ -1,0 +1,283 @@
+## 5.4. Мобильный Клиент (Flutter) - Детализация
+
+Flutter клиент будет построен с использованием архитектуры BLoC/Cubit для управления состоянием, что обеспечит чистоту кода, тестируемость и масштабируемость. Для сетевых запросов будет использоваться библиотека `dio`.
+
+### 5.4.1. Структура Папок (Пример)
+
+```
+/lib
+  /api
+    api_client.dart           # Dio клиент для REST API
+    websocket_client.dart     # Клиент для WebSocket соединений
+  /auth
+    /bloc
+      auth_bloc.dart
+      auth_event.dart
+      auth_state.dart
+    /repository
+      auth_repository.dart    # Взаимодействие с Auth API
+    auth_screen.dart
+  /game
+    /bloc
+      game_search_bloc.dart
+      game_search_event.dart
+      game_search_state.dart
+      game_bloc.dart
+      game_event.dart
+      game_state.dart
+    /repository
+      game_repository.dart    # Взаимодействие с Game API и WebSocket
+    game_search_screen.dart
+    game_play_screen.dart
+  /profile
+    /bloc
+      profile_bloc.dart
+      profile_event.dart
+      profile_state.dart
+    /repository
+      profile_repository.dart # Взаимодействие с Profile API
+    profile_screen.dart
+  /models
+    user.dart
+    movie.dart
+    person.dart
+    game_session.dart
+    # ... другие модели данных
+  /utils
+    app_router.dart           # Навигация
+    constants.dart
+    shared_preferences.dart   # Для хранения JWT
+  main.dart
+```
+
+### 5.4.2. Управление Состоянием с BLoC/Cubit
+
+Каждый функциональный модуль (Auth, Game, Profile) будет иметь свой BLoC/Cubit для управления состоянием. Это позволяет изолировать логику и упростить тестирование.
+
+#### 1. `AuthBloc`
+
+*   **События (Events):**
+    *   `AuthRegisterRequested(email, password, nickname)`: Запрос на регистрацию.
+    *   `AuthLoginRequested(email, password)`: Запрос на вход.
+    *   `AuthLogoutRequested()`: Запрос на выход.
+    *   `AuthCheckStatus()`: Проверка статуса аутентификации (например, при запуске приложения).
+    *   `AuthEmailVerified()`: Событие, сигнализирующее об успешной верификации email.
+*   **Состояния (States):**
+    *   `AuthInitial`: Начальное состояние.
+    *   `AuthLoading`: Загрузка (например, во время запроса к API).
+    *   `AuthAuthenticated(user)`: Пользователь аутентифицирован.
+    *   `AuthUnauthenticated`: Пользователь не аутентифицирован.
+    *   `AuthRegistrationSuccess`: Успешная регистрация (ожидание верификации email).
+    *   `AuthError(message)`: Ошибка аутентификации.
+
+**Пример `auth_bloc.dart` (упрощенно):**
+
+```dart
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
+import 'package:your_app/auth/repository/auth_repository.dart';
+import 'package:your_app/models/user.dart';
+
+// Events
+abstract class AuthEvent extends Equatable { const AuthEvent(); @override List<Object> get props => []; }
+class AuthRegisterRequested extends AuthEvent { final String email, password, nickname; const AuthRegisterRequested(this.email, this.password, this.nickname); @override List<Object> get props => [email, password, nickname]; }
+class AuthLoginRequested extends AuthEvent { final String email, password; const AuthLoginRequested(this.email, this.password); @override List<Object> get props => [email, password]; }
+class AuthLogoutRequested extends AuthEvent {} 
+class AuthCheckStatus extends AuthEvent {} 
+class AuthEmailVerified extends AuthEvent {} 
+
+// States
+abstract class AuthState extends Equatable { const AuthState(); @override List<Object> get props => []; }
+class AuthInitial extends AuthState {} 
+class AuthLoading extends AuthState {} 
+class AuthAuthenticated extends AuthState { final User user; const AuthAuthenticated(this.user); @override List<Object> get props => [user]; }
+class AuthUnauthenticated extends AuthState {} 
+class AuthRegistrationSuccess extends AuthState {} 
+class AuthError extends AuthState { final String message; const AuthError(this.message); @override List<Object> get props => [message]; }
+
+class AuthBloc extends Bloc<AuthEvent, AuthState> {
+  final AuthRepository authRepository;
+
+  AuthBloc({required this.authRepository}) : super(AuthInitial()) {
+    on<AuthRegisterRequested>(_onRegisterRequested);
+    on<AuthLoginRequested>(_onLoginRequested);
+    on<AuthLogoutRequested>(_onLogoutRequested);
+    on<AuthCheckStatus>(_onCheckStatus);
+    on<AuthEmailVerified>(_onEmailVerified);
+  }
+
+  Future<void> _onRegisterRequested(AuthRegisterRequested event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      await authRepository.register(event.email, event.password, event.nickname);
+      emit(AuthRegistrationSuccess());
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
+  Future<void> _onLoginRequested(AuthLoginRequested event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      final user = await authRepository.login(event.email, event.password);
+      emit(AuthAuthenticated(user));
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
+  // ... другие обработчики событий
+}
+```
+
+#### 2. `ProfileBloc`
+
+*   **События (Events):**
+    *   `ProfileLoadRequested()`: Запрос на загрузку данных профиля.
+    *   `ProfileUpdateNicknameRequested(newNickname)`: Запрос на обновление никнейма.
+*   **Состояния (States):**
+    *   `ProfileInitial`
+    *   `ProfileLoading`
+    *   `ProfileLoaded(user)`: Профиль загружен.
+    *   `ProfileUpdated(user)`: Профиль успешно обновлен.
+    *   `ProfileError(message)`
+
+#### 3. `GameSearchBloc`
+
+*   **События (Events):**
+    *   `GameSearchStartRequested()`: Начать поиск оппонента.
+    *   `GameSearchCancelRequested()`: Отменить поиск.
+    *   `GameMatchFound(sessionId)`: Событие, когда бэкенд нашел матч.
+*   **Состояния (States):**
+    *   `GameSearchInitial`
+    *   `GameSearchLoading`: Поиск оппонента.
+    *   `GameSearchMatchFound(sessionId)`: Матч найден, готов к переходу на игровой экран.
+    *   `GameSearchError(message)`
+
+#### 4. `GameBloc`
+
+Это будет самый сложный BLoC, так как он будет взаимодействовать с WebSocket и обрабатывать множество игровых событий.
+
+*   **События (Events):**
+    *   `GameStarted(session)`: Игра началась (получено от WebSocket).
+    *   `GameMoveMade(movieId, movieTitle)`: Игрок сделал ход.
+    *   `GameSkipTurn()`: Игрок пропустил ход.
+    *   `GameRequestHint()`: Игрок запросил подсказку.
+    *   `GameTurnUpdated(turnData)`: Обновление хода (получено от WebSocket).
+    *   `GameEnded(resultData)`: Игра закончилась (получено от WebSocket).
+    *   `GameError(message)`: Ошибка в игре (получено от WebSocket или внутренняя).
+*   **Состояния (States):**
+    *   `GameInitial`
+    *   `GameLoading`
+    *   `GameInProgress(session, currentMovie, player1Skips, player2Skips, ...)`: Игра активна.
+    *   `GameMoveProcessing`: Обработка хода игрока.
+    *   `GameHintRevealed(movie, persons)`: Подсказка показана.
+    *   `GameEnded(result)`: Игра завершена.
+    *   `GameError(message)`
+
+### 5.4.3. Сетевые Запросы (`dio`)
+
+`dio` будет использоваться для всех HTTP-запросов к REST API. Он будет настроен с `Interceptor` для автоматического добавления JWT токена в заголовки запросов после логина.
+
+**Пример настройки `ApiClient` с `dio`:**
+
+```dart
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class ApiClient {
+  final Dio _dio = Dio();
+
+  ApiClient() {
+    _dio.options.baseUrl = 'http://localhost:8080/api/v1'; // Заменить на реальный URL бэкенда
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('jwt_token');
+        if (token != null) {
+          options.headers['Authorization'] = 'Bearer $token';
+        }
+        return handler.next(options);
+      },
+      onError: (DioException e, handler) {
+        // Обработка ошибок, например, 401 Unauthorized для обновления токена или выхода
+        return handler.next(e);
+      },
+    ));
+  }
+
+  Dio get dio => _dio;
+}
+```
+
+### 5.4.4. WebSocket Клиент
+
+Для WebSocket соединений будет использоваться библиотека `web_socket_channel` или аналогичная. Клиент будет отвечать за установление соединения, отправку и получение JSON сообщений.
+
+**Пример `websocket_client.dart`:**
+
+```dart
+import 'dart:convert';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class WebSocketGameClient {
+  WebSocketChannel? _channel;
+  final String sessionId;
+  final String baseUrl;
+
+  WebSocketGameClient({required this.sessionId, required this.baseUrl});
+
+  Stream<Map<String, dynamic>> connect() async* {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token');
+    if (token == null) {
+      throw Exception('JWT token not found');
+    }
+
+    final uri = Uri.parse('$baseUrl/ws/game/$sessionId');
+    _channel = WebSocketChannel.connect(
+      uri,
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    await _channel!.ready;
+    print('WebSocket connected to $sessionId');
+
+    await for (final message in _channel!.stream) {
+      yield jsonDecode(message) as Map<String, dynamic>;
+    }
+  }
+
+  void sendMessage(Map<String, dynamic> message) {
+    if (_channel != null && _channel!.sink != null) {
+      _channel!.sink.add(jsonEncode(message));
+    }
+  }
+
+  void disconnect() {
+    _channel?.sink.close();
+    print('WebSocket disconnected from $sessionId');
+  }
+}
+```
+
+### 5.4.5. Навигация
+
+Для навигации будет использоваться `GoRouter` или стандартный `Navigator` с именованными маршрутами. `AuthBloc` будет использоваться для защиты маршрутов, перенаправляя неаутентифицированных пользователей на экран логина.
+
+**Пример маршрутов:**
+
+*   `/` -> `SplashScreen` (проверяет статус аутентификации)
+*   `/login` -> `AuthScreen` (для входа/регистрации)
+*   `/home` -> `HomeScreen` (главный экран с поиском игры)
+*   `/profile` -> `ProfileScreen`
+*   `/game/:sessionId` -> `GamePlayScreen` (экран активной игры)
+
+### 5.4.6. UI/UX Замечания
+
+*   **Индикаторы загрузки:** Использование `CircularProgressIndicator` или скелетных экранов во время загрузки данных.
+*   **Обратная связь:** Четкие сообщения об ошибках, успехах и состоянии игры.
+*   **Таймер:** Визуальное отображение оставшегося времени на ход в игровом процессе.
+*   **Адаптивный дизайн:** Приложение должно корректно отображаться на разных размерах экранов мобильных устройств.
+*   **Поиск фильмов:** Реализовать автодополнение при вводе названия фильма для хода, используя `search/movie` эндпоинт TMDb API через бэкенд. Это улучшит UX и снизит вероятность ошибок ввода.

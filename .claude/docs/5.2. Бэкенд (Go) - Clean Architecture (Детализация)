@@ -1,0 +1,516 @@
+## 5.2. Бэкенд (Go) - Clean Architecture (Детализация)
+
+Выбор чистого `net/http` в сочетании с **Clean Architecture** [1] позволит создать гибкий, тестируемый и поддерживаемый бэкенд. Основная идея Clean Architecture — разделение на слои, где каждый слой имеет свою ответственность и зависимости направлены внутрь.
+
+### 5.2.1. Структура Папок
+
+```
+/cmd
+  /api
+    main.go                 # Точка входа для HTTP/WebSocket сервера
+/internal
+  /adapters
+    /repository             # Реализации интерфейсов репозиториев (PostgreSQL)
+      user_repository.go
+      movie_repository.go
+      game_session_repository.go
+    /tmdb                   # Клиент для взаимодействия с TMDb API
+      tmdb_client.go
+    /email                  # Сервис для отправки email (например, Mailtrap)
+      email_sender.go
+  /domain                   # Core бизнес-сущности и правила (не зависят от других слоев)
+    user.go
+    movie.go
+    person.go
+    game_session.go
+    game_move.go
+    # ... другие доменные сущности
+  /usecases                 # Бизнес-логика, оркестрация доменных сущностей и репозиториев
+    auth_usecase.go
+    game_usecase.go
+    profile_usecase.go
+    # ... другие use cases
+  /delivery                 # Внешний интерфейс (HTTP, WebSocket)
+    /http
+      auth_handler.go
+      game_handler.go
+      profile_handler.go
+      router.go             # Настройка маршрутов и middleware
+    /websocket
+      game_websocket_handler.go # Обработка WebSocket соединений для игр
+/pkg
+  /jwt                      # Утилиты для работы с JWT токенами
+    jwt_manager.go
+  /password                 # Утилиты для хеширования паролей
+    password_hasher.go
+  /errors                   # Кастомные ошибки приложения
+    app_errors.go
+  /config                   # Загрузка и управление конфигурацией приложения
+    config.go
+  /logger                   # Настройка логирования
+    logger.go
+```
+
+### 5.2.2. Слои Clean Architecture
+
+#### 1. Domain Layer (Внутренний слой)
+
+Содержит основные бизнес-сущности и правила. Этот слой не должен зависеть ни от каких внешних фреймворков, баз данных или UI. Он определяет *что* делает бизнес.
+
+**Пример структуры `User`:**
+
+```go
+package domain
+
+import (
+	"time"
+	"github.com/google/uuid"
+)
+
+type User struct {
+	ID           uuid.UUID
+	Email        string
+	PasswordHash string
+	Nickname     string
+	IsVerified   bool
+	Wins         int
+	Losses       int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// UserRepository определяет интерфейс для работы с хранилищем пользователей.
+// Реализация этого интерфейса будет находиться в слое Adapters.
+type UserRepository interface {
+	Create(user *User) error
+	FindByEmail(email string) (*User, error)
+	FindByID(id uuid.UUID) (*User, error)
+	Update(user *User) error
+	// ... другие методы, например, для обновления статистики
+}
+
+// EmailVerificationRepository определяет интерфейс для работы с верификациями email.
+type EmailVerificationRepository interface {
+	Create(verification *EmailVerification) error
+	FindByCode(code string) (*EmailVerification, error)
+	Delete(id uuid.UUID) error
+}
+
+// ... аналогичные интерфейсы для MovieRepository, PersonRepository, GameSessionRepository, GameMoveRepository
+```
+
+#### 2. Usecases Layer (Слой Применения)
+
+Содержит бизнес-логику приложения, специфичную для конкретных вариантов использования (use cases). Он оркестрирует доменные сущности и взаимодействует с интерфейсами репозиториев, определенных в доменном слое. Этот слой определяет *как* бизнес выполняет свои операции.
+
+**Пример интерфейса `AuthUsecase`:**
+
+```go
+package usecases
+
+import (
+	"context"
+	"time"
+	"your_project/internal/domain"
+	"github.com/google/uuid"
+)
+
+type AuthUsecase interface {
+	Register(ctx context.Context, email, password, nickname string) (*domain.User, error)
+	VerifyEmail(ctx context.Context, code string) error
+	Login(ctx context.Context, email, password string) (string, error) // Возвращает JWT токен
+	// ... другие методы, например, для восстановления пароля
+}
+
+// AuthUsecaseImpl - реализация use case
+type AuthUsecaseImpl struct {
+	userRepo              domain.UserRepository
+	emailVerificationRepo domain.EmailVerificationRepository
+	passwordHasher        domain.PasswordHasher // Интерфейс для хеширования паролей
+	jwtManager            domain.JWTManager     // Интерфейс для работы с JWT
+	emailSender           domain.EmailSender    // Интерфейс для отправки email
+	// ... другие зависимости
+}
+
+func NewAuthUsecase(userRepo domain.UserRepository, ... ) *AuthUsecaseImpl {
+	return &AuthUsecaseImpl{userRepo: userRepo, ...}
+}
+
+func (uc *AuthUsecaseImpl) Register(ctx context.Context, email, password, nickname string) (*domain.User, error) {
+	// 1. Проверить, что пользователь с таким email или никнеймом не существует
+	// 2. Хешировать пароль
+	// 3. Создать нового пользователя
+	// 4. Сохранить пользователя через userRepo.Create()
+	// 5. Создать код верификации email и сохранить через emailVerificationRepo.Create()
+	// 6. Отправить письмо с верификацией через emailSender.SendVerificationEmail()
+	// 7. Вернуть пользователя
+	return nil, nil // Заглушка
+}
+
+// ... другие методы AuthUsecase
+```
+
+#### 3. Adapters Layer (Слой Адаптеров)
+
+Этот слой содержит реализации интерфейсов, определенных в доменном слое. Он адаптирует внешние детали (базы данных, сторонние API) к внутренним требованиям приложения. Здесь находятся конкретные реализации репозиториев, клиентов для внешних сервисов.
+
+**Пример реализации `UserRepository` для PostgreSQL:**
+
+```go
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"your_project/internal/domain"
+	"github.com/google/uuid"
+)
+
+type PostgresUserRepository struct {
+	db *sql.DB
+}
+
+func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
+	return &PostgresUserRepository{db: db}
+}
+
+func (r *PostgresUserRepository) Create(user *domain.User) error {
+	query := `INSERT INTO users (id, email, password_hash, nickname, is_verified, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+	stmt, err := r.db.Prepare(query)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow(
+		user.ID,
+		user.Email,
+		user.PasswordHash,
+		user.Nickname,
+		user.IsVerified,
+		user.CreatedAt,
+		user.UpdatedAt,
+	).Scan(&user.ID)
+
+	return err
+}
+
+func (r *PostgresUserRepository) FindByEmail(email string) (*domain.User, error) {
+	user := &domain.User{}
+	query := `SELECT id, email, password_hash, nickname, is_verified, wins, losses, created_at, updated_at FROM users WHERE email = $1`
+	err := r.db.QueryRow(query, email).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.Nickname,
+		&user.IsVerified,
+		&user.Wins,
+		&user.Losses,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, domain.ErrUserNotFound
+	}
+	return user, err
+}
+
+// ... другие методы UserRepository
+```
+
+**Пример клиента TMDb:**
+
+```go
+package tmdb
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+	"your_project/internal/domain"
+)
+
+const tmdbAPIURL = "https://api.themoviedb.org/3"
+
+type TMDbClient struct {
+	apiKey     string
+	httpClient *http.Client
+}
+
+func NewTMDbClient(apiKey string) *TMDbClient {
+	return &TMDbClient{
+		apiKey: apiKey,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+type tmdbMovieResponse struct {
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	PosterPath  string `json:"poster_path"`
+	ReleaseDate string `json:"release_date"`
+	Overview    string `json:"overview"`
+}
+
+// GetMovieByID fetches movie details from TMDb and converts to domain.Movie
+func (c *TMDbClient) GetMovieByID(ctx context.Context, movieID int) (*domain.Movie, error) {
+	url := fmt.Sprintf("%s/movie/%d?api_key=%s", tmdbAPIURL, movieID, c.apiKey)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("TMDb API returned status %d", res.StatusCode)
+	}
+
+	var tmdbRes tmdbMovieResponse
+	if err := json.NewDecoder(res.Body).Decode(&tmdbRes); err != nil {
+		return nil, err
+	}
+
+	// Преобразование в доменную сущность
+	movie := &domain.Movie{
+		ID:         tmdbRes.ID,
+		Title:      tmdbRes.Title,
+		PosterPath: tmdbRes.PosterPath,
+		Overview:   tmdbRes.Overview,
+	}
+	// Парсинг даты и т.д.
+
+	return movie, nil
+}
+
+// ... методы для получения актеров, режиссеров, композиторов
+```
+
+#### 4. Delivery Layer (Внешний слой)
+
+Этот слой отвечает за представление данных пользователю и обработку внешних запросов. Здесь находятся HTTP-хендлеры, WebSocket-обработчики. Они преобразуют запросы из внешнего формата во внутренний (вызовы use cases) и обратно.
+
+**Пример HTTP-хендлера для регистрации:**
+
+```go
+package http
+
+import (
+	"encoding/json"
+	"net/http"
+	"your_project/internal/usecases"
+	"your_project/pkg/errors"
+)
+
+type AuthHandler struct {
+	authUsecase usecases.AuthUsecase
+	// ... другие зависимости, например, логгер
+}
+
+func NewAuthHandler(authUsecase usecases.AuthUsecase) *AuthHandler {
+	return &AuthHandler{authUsecase: authUsecase}
+}
+
+type registerRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Nickname string `json:"nickname"`
+}
+
+func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, errors.ErrInvalidInput.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authUsecase.Register(r.Context(), req.Email, req.Password, req.Nickname)
+	if err != nil {
+		// Обработка различных ошибок use case
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "User registered successfully. Please check your email for verification.", "user_id": user.ID.String()})
+}
+
+// ... другие хендлеры для логина, верификации email
+```
+
+### 5.2.3. Dependency Injection (Внедрение Зависимостей)
+
+В Go внедрение зависимостей обычно реализуется вручную через конструкторы. Это означает, что при создании объекта (например, `AuthUsecaseImpl`), ему передаются все необходимые зависимости (например, `UserRepository`, `PasswordHasher`).
+
+**Пример в `main.go`:**
+
+```go
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	_ "github.com/lib/pq" // PostgreSQL driver
+
+	"your_project/internal/adapters/email"
+	"your_project/internal/adapters/repository"
+	"your_project/internal/adapters/tmdb"
+	"your_project/internal/delivery/http"
+	"your_project/internal/usecases"
+	"your_project/pkg/config"
+	"your_project/pkg/jwt"
+	"your_project/pkg/password"
+)
+
+func main() {
+	cfg := config.LoadConfig() // Загрузка конфигурации из .env или переменных окружения
+
+	// Инициализация базы данных
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	// Инициализация адаптеров (репозиториев, клиентов)
+	userRepo := repository.NewPostgresUserRepository(db)
+	emailVerificationRepo := repository.NewPostgresEmailVerificationRepository(db)
+	movieRepo := repository.NewPostgresMovieRepository(db)
+	personRepo := repository.NewPostgresPersonRepository(db)
+	moviePersonRoleRepo := repository.NewPostgresMoviePersonRoleRepository(db)
+	gameSessionRepo := repository.NewPostgresGameSessionRepository(db)
+	gameMoveRepo := repository.NewPostgresGameMoveRepository(db)
+
+	tmdbClient := tmdb.NewTMDbClient(cfg.TMDbAPIKey)
+	emailSender := email.NewMailtrapEmailSender(cfg.MailtrapHost, cfg.MailtrapPort, cfg.MailtrapUser, cfg.MailtrapPass)
+
+	// Инициализация pkg утилит
+	passwordHasher := password.NewBcryptHasher()
+	jwtManager := jwt.NewJWTManager(cfg.JWTSecret, time.Hour*24) // Токен действителен 24 часа
+
+	// Инициализация use cases
+	authUsecase := usecases.NewAuthUsecase(
+		userRepo,
+		emailVerificationRepo,
+		passwordHasher,
+		jwtManager,
+		emailSender,
+		cfg.AppBaseURL, // Для формирования ссылки верификации
+	)
+	gameUsecase := usecases.NewGameUsecase(
+		gameSessionRepo,
+		gameMoveRepo,
+		userRepo,
+		movieRepo,
+		personRepo,
+		moviePersonRoleRepo,
+		tmdbClient,
+		cfg.TurnTimeoutSeconds,
+	)
+	profileUsecase := usecases.NewProfileUsecase(userRepo)
+
+	// Инициализация хендлеров Delivery слоя
+	authHandler := http.NewAuthHandler(authUsecase)
+	gameHandler := http.NewGameHandler(gameUsecase, jwtManager) // JWTManager для извлечения user ID из токена
+	profileHandler := http.NewProfileHandler(profileUsecase, jwtManager)
+
+	// Настройка маршрутизатора
+	router := http.NewRouter(authHandler, gameHandler, profileHandler, jwtManager) // Передача хендлеров и JWTManager для middleware
+
+	// Запуск HTTP сервера
+	log.Printf("Server starting on port %s", cfg.Port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), router))
+}
+```
+
+### 5.2.4. Обработка Ошибок
+
+Будет использоваться централизованный подход к ошибкам с кастомными типами ошибок в `pkg/errors`, что позволит четко различать ошибки на разных слоях и корректно возвращать их клиенту.
+
+```go
+package errors
+
+import "errors"
+
+var (
+	ErrUserNotFound         = errors.New("user not found")
+	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrEmailAlreadyExists   = errors.New("email already exists")
+	ErrNicknameAlreadyExists = errors.New("nickname already exists")
+	ErrVerificationCodeExpired = errors.New("verification code expired or invalid")
+	ErrGameSessionNotFound  = errors.New("game session not found")
+	ErrInvalidGameMove      = errors.New("invalid game move")
+	ErrNotYourTurn          = errors.New("not your turn")
+	ErrNoSkipsLeft          = errors.New("no skips left")
+	ErrNoHintsLeft          = errors.New("no hints left")
+	ErrMovieNotFound        = errors.New("movie not found")
+	ErrTMDbAPIError         = errors.New("TMDb API error")
+	ErrInternalServer       = errors.New("internal server error")
+	ErrInvalidInput         = errors.New("invalid input")
+)
+
+// CustomError - интерфейс для кастомных ошибок с кодом статуса HTTP
+type CustomError interface {
+	Error() string
+	StatusCode() int
+}
+
+// Implementations for CustomError for specific HTTP status codes
+// ...
+```
+
+### 5.2.5. Middleware
+
+Для обработки JWT токенов и других общих задач (логирование, CORS) будут использоваться HTTP middleware. Пример middleware для аутентификации:
+
+```go
+package http
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"your_project/pkg/jwt"
+	"your_project/pkg/errors"
+)
+
+func AuthMiddleware(jwtManager *jwt.JWTManager, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, errors.ErrUnauthorized.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		headerParts := strings.Split(authHeader, " ")
+		if len(headerParts) != 2 || headerParts[0] != "Bearer" {
+			http.Error(w, errors.ErrUnauthorized.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := headerParts[1]
+		claims, err := jwtManager.VerifyToken(tokenString)
+		if err != nil {
+			http.Error(w, errors.ErrUnauthorized.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		// Добавляем user ID в контекст запроса
+		ctx := context.WithValue(r.Context(), "userID", claims.UserID)
+		r = r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+```
+
+[1]: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html "The Clean Architecture by Uncle Bob"
