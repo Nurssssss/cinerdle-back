@@ -53,8 +53,15 @@ func main() {
 	)
 	movieHand := delivery.NewMovieHandler(movieCase)
 
-	router := delivery.NewRouter(authHand, authMiddleCase, movieHand)
+	// gameSession ----  POST find-game
+	gameRepo := repository.NewPostgressGameSessionRepository(db)
 
+	gameCase := usecases.NewGameSessionUseCase(
+		gameRepo,
+	)
+	gameHand := delivery.NewGameHandler(gameCase)
+	// конец -- gameSession
+	router := delivery.NewRouter(authHand, authMiddleCase, movieHand, gameHand)
 	mux := http.NewServeMux()
 	router.Setup(mux)
 	fmt.Println("Server started on :8080")
