@@ -19,15 +19,17 @@ var upgrader = websocket.Upgrader{
 
 type GameWebsocketHandler struct {
 	gameUseCase GameUseCase
+	hub         *Hub
 }
 
 type GameUseCase interface {
 	CreateGame(firstPlayer, secondPlayer uuid.UUID) (*domain.GameSession, error)
 }
 
-func NewWebsocketHandler(gameUseCase GameUseCase) *GameWebsocketHandler {
+func NewWebsocketHandler(gameUseCase GameUseCase, hub *Hub) *GameWebsocketHandler {
 	return &GameWebsocketHandler{
 		gameUseCase: gameUseCase,
+		hub:         hub,
 	}
 }
 
@@ -39,6 +41,8 @@ func (weh *GameWebsocketHandler) HandleConnection(w http.ResponseWriter, r *http
 		return
 	}
 
+	weh.hub.AddToQueue(conn)
+	weh.hub.TryMatch()
 	for {
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
@@ -51,4 +55,5 @@ func (weh *GameWebsocketHandler) HandleConnection(w http.ResponseWriter, r *http
 		}
 
 	}
+
 }

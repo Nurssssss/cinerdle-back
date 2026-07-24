@@ -64,7 +64,9 @@ func main() {
 	// конец -- gameSession
 
 	// gamewebsocket -- GET handle-connection
-	gameWebSocketHandler := websocket.NewWebsocketHandler(gameCase)
+
+	hub := websocket.NewHub()
+	gameWebSocketHandler := websocket.NewWebsocketHandler(gameCase, hub)
 	// end
 
 	router := delivery.NewRouter(authHand, authMiddleCase, movieHand, gameHand, gameWebSocketHandler)
