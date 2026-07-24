@@ -5,6 +5,7 @@ import (
 	"cinerdle-back/internal/adapters/repository"
 	adapters "cinerdle-back/internal/adapters/tmdb"
 	delivery "cinerdle-back/internal/delivery/http"
+	websocket "cinerdle-back/internal/delivery/websocket"
 	"cinerdle-back/internal/usecases"
 	"cinerdle-back/pkg/config"
 	"cinerdle-back/pkg/jwt"
@@ -61,7 +62,12 @@ func main() {
 	)
 	gameHand := delivery.NewGameHandler(gameCase)
 	// конец -- gameSession
-	router := delivery.NewRouter(authHand, authMiddleCase, movieHand, gameHand)
+
+	// gamewebsocket -- GET handle-connection
+	gameWebSocketHandler := websocket.NewWebsocketHandler(gameCase)
+	// end
+
+	router := delivery.NewRouter(authHand, authMiddleCase, movieHand, gameHand, gameWebSocketHandler)
 	mux := http.NewServeMux()
 	router.Setup(mux)
 	fmt.Println("Server started on :8080")
