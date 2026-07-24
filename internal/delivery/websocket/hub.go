@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"math/rand"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -29,6 +30,12 @@ func (hu *Hub) TryMatch() {
 		secondPlayer := hu.queue[1]
 		firstPlayer.WriteMessage(websocket.TextMessage, []byte("game_found"))
 		secondPlayer.WriteMessage(websocket.TextMessage, []byte("game_found"))
+		index := rand.Intn(2)
+		randomWhoStarted := hu.queue[index]
+		randomWhoWaited := hu.queue[1-index]
+		randomWhoStarted.WriteMessage(websocket.TextMessage, []byte("you_start_first"))
+		randomWhoWaited.WriteMessage(websocket.TextMessage, []byte("you_wait"))
+
 		hu.queue = hu.queue[2:]
 	}
 
